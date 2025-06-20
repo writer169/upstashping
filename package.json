@@ -1,0 +1,12 @@
+{
+  "name": "upstashping",
+  "version": "1.0.0",
+  "description": "Simple service to ping Upstash Redis",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
