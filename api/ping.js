@@ -7,12 +7,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Подключаемся к Upstash Redis
-    const response = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/ping`, {
+    // Отправляем PING команду через Upstash REST API
+    const response = await fetch(`https://${process.env.UPSTASH_REDIS_ENDPOINT}/ping`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
-        'Content-Type': 'application/json'
+        'Authorization': `Bearer ${process.env.UPSTASH_REDIS_TOKEN}`
       }
     });
 
