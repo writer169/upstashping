@@ -15,39 +15,102 @@ export default async function handler(req, res) {
 
     const timestamp = new Date().toISOString();
     const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const dayOfWeek = new Date().getDay(); // 0-6
     
-    // Выполняем различные операции для активности
     const operations = [];
 
-    // 1. Записываем метрики активности
+    // 1. Основные метрики активности (TTL 30 дней)
     operations.push(
-      fetch(`${baseUrl}/hset/app_metrics`, {
+      fetch(`${baseUrl}/setex/app_metrics:last_activity/2592000`, {
         method: 'POST',
         headers,
-        body: JSON.stringify([
-          "last_activity", timestamp,
-          "last_ping_date", date,
-          "server_status", "active"
-        ])
-      })
-    );
-
-    // 2. Инкрементируем счетчики
-    operations.push(
-      fetch(`${baseUrl}/incr/daily_pings:${date}`, {
+        body: JSON.stringify(timestamp)
+      }),
+      fetch(`${baseUrl}/setex/app_metrics:last_ping_date/2592000`, {
         method: 'POST',
-        headers
-      })
-    );
-
-    operations.push(
-      fetch(`${baseUrl}/incr/total_pings`, {
+        headers,
+        body: JSON.stringify(date)
+      }),
+      fetch(`${baseUrl}/setex/app_metrics:server_status/2592000`, {
         method: 'POST',
-        headers
+        headers,
+        body: JSON.stringify("active")
       })
     );
 
-    // 3. Записываем лог активности с TTL (автоудаление через 30 дней)
+    // 2. Счетчики с TTL
+    // Дневной счетчик (TTL 10 дней - чтобы покрыть период отображения)
+    operations.push(
+      fetch(`${baseUrl}/eval`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          script: `
+            local key = KEYS[1]
+            local ttl = ARGV[1]
+            local current = redis.call('GET', key)
+            if current then
+              redis.call('INCR', key)
+            else
+              redis.call('SETEX', key, ttl, 1)
+            end
+            return redis.call('GET', key)
+          `,
+          keys: [`daily_pings:${date}`],
+          args: ["864000"] // 10 дней
+        })
+      })
+    );
+
+    // Общий счетчик пингов (TTL 30 дней, будет обновляться при каждом пинге)
+    operations.push(
+      fetch(`${baseUrl}/eval`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          script: `
+            local key = KEYS[1]
+            local ttl = ARGV[1]
+            local current = redis.call('GET', key)
+            if current then
+              redis.call('INCR', key)
+              redis.call('EXPIRE', key, ttl)
+            else
+              redis.call('SETEX', key, ttl, 1)
+            end
+            return redis.call('GET', key)
+          `,
+          keys: ["total_pings"],
+          args: ["2592000"] // 30 дней
+        })
+      })
+    );
+
+    // Счетчик по дням недели (TTL 30 дней)
+    operations.push(
+      fetch(`${baseUrl}/eval`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          script: `
+            local key = KEYS[1]
+            local ttl = ARGV[1]
+            local current = redis.call('GET', key)
+            if current then
+              redis.call('INCR', key)
+              redis.call('EXPIRE', key, ttl)
+            else
+              redis.call('SETEX', key, ttl, 1)
+            end
+            return redis.call('GET', key)
+          `,
+          keys: [`stats:day_${dayOfWeek}`],
+          args: ["2592000"] // 30 дней
+        })
+      })
+    );
+
+    // 3. Лог активности с TTL (30 дней)
     operations.push(
       fetch(`${baseUrl}/setex/activity_log:${timestamp}/2592000`, {
         method: 'POST',
@@ -61,29 +124,35 @@ export default async function handler(req, res) {
       })
     );
 
-    // 4. Обновляем список последних активностей (сохраняем только последние 10)
+    // 4. Список последних активностей с TTL (7 дней) и автоограничением
     operations.push(
-      fetch(`${baseUrl}/lpush/recent_activities`, {
+      fetch(`${baseUrl}/eval`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(timestamp)
-      }),
-      fetch(`${baseUrl}/ltrim/recent_activities/0/9`, {
-        method: 'POST',
-        headers
+        body: JSON.stringify({
+          script: `
+            local key = KEYS[1]
+            local value = ARGV[1]
+            local ttl = ARGV[2]
+            
+            -- Добавляем новый элемент
+            redis.call('LPUSH', key, value)
+            
+            -- Ограничиваем список до 10 элементов
+            redis.call('LTRIM', key, 0, 9)
+            
+            -- Устанавливаем TTL
+            redis.call('EXPIRE', key, ttl)
+            
+            return redis.call('LRANGE', key, 0, -1)
+          `,
+          keys: ["recent_activities"],
+          args: [timestamp, "604800"] // 7 дней
+        })
       })
     );
 
-    // 5. Записываем статистику по дням недели
-    const dayOfWeek = new Date().getDay();
-    operations.push(
-      fetch(`${baseUrl}/incr/stats:day_${dayOfWeek}`, {
-        method: 'POST',
-        headers
-      })
-    );
-
-    // 6. Сохраняем системную информацию
+    // 5. Системная информация с TTL (1 час - обновляется часто)
     const systemInfo = {
       timestamp,
       uptime: process.uptime(),
@@ -93,7 +162,7 @@ export default async function handler(req, res) {
     };
 
     operations.push(
-      fetch(`${baseUrl}/set/system_info`, {
+      fetch(`${baseUrl}/setex/system_info/3600`, {
         method: 'POST',
         headers,
         body: JSON.stringify(systemInfo)
@@ -103,9 +172,9 @@ export default async function handler(req, res) {
     // Выполняем все операции
     const results = await Promise.allSettled(operations);
     
-    // Читаем некоторые данные для дополнительной активности
+    // Читаем некоторые данные для проверки
     const readOperations = await Promise.allSettled([
-      fetch(`${baseUrl}/hgetall/app_metrics`, { method: 'POST', headers }),
+      fetch(`${baseUrl}/get/app_metrics:last_activity`, { method: 'POST', headers }),
       fetch(`${baseUrl}/get/total_pings`, { method: 'POST', headers }),
       fetch(`${baseUrl}/lrange/recent_activities/0/4`, { method: 'POST', headers })
     ]);
