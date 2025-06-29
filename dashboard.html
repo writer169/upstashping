@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upstash Redis Monitor</title>
+    <title>Монитор Upstash Redis</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <style>
         * {
@@ -172,24 +172,24 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🗄️ Upstash Redis Monitor</h1>
-            <p>Real-time database activity monitoring</p>
+            <h1>🗄️ Монитор Upstash Redis</h1>
+            <p>Мониторинг активности базы данных в реальном времени</p>
         </div>
         
         <button class="refresh-btn" onclick="loadDashboard()">
-            🔄 Refresh
+            🔄 Обновить
         </button>
         
         <div id="loading" class="loading">
-            Loading dashboard data...
+            Загрузка данных панели управления...
         </div>
         
         <div id="error" class="error" style="display: none;">
-            Failed to load dashboard data. Please check your API key and try again.
+            Не удалось загрузить данные панели управления. Проверьте ваш API-ключ и попробуйте снова.
         </div>
         
         <div id="dashboard" class="dashboard" style="display: none;">
-            <!-- Dashboard content will be inserted here -->
+            <!-- Содержимое панели управления будет вставлено здесь -->
         </div>
     </div>
 
@@ -219,132 +219,135 @@
                 dashboard.style.display = 'grid';
                 
             } catch (err) {
-                console.error('Dashboard error:', err);
+                console.error('Ошибка панели управления:', err);
                 loading.style.display = 'none';
                 error.style.display = 'block';
-                error.textContent = `Error: ${err.message}`;
+                error.textContent = `Ошибка: ${err.message}`;
             }
         }
         
         function renderDashboard(data) {
             const dashboard = document.getElementById('dashboard');
+            const dayNames = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
             
             dashboard.innerHTML = `
-                <!-- Database Status -->
+                <!-- Статус базы данных -->
                 <div class="card">
                     <h3>
                         <span class="status-indicator ${data.health.database_responsive ? 'status-online' : 'status-offline'}"></span>
-                        Database Status
+                        Статус базы данных
                     </h3>
                     <div class="metric">
-                        <span class="metric-label">Connection</span>
-                        <span class="metric-value">${data.health.database_responsive ? 'Connected' : 'Disconnected'}</span>
+                        <span class="metric-label">Подключение</span>
+                        <span class="metric-value">${data.health.database_responsive ? 'Подключено' : 'Отключено'}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Database Size</span>
-                        <span class="metric-value">${data.database.size || 'N/A'} keys</span>
+                        <span class="metric-label">Размер базы данных</span>
+                        <span class="metric-value">${data.database.size || 'Н/Д'} ключей</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Server Status</span>
-                        <span class="metric-value">${data.activity.server_status}</span>
+                        <span class="metric-label">Статус сервера</span>
+                        <span class="metric-value">${data.activity.server_status === 'active' ? 'Активен' : data.activity.server_status}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Last Updated</span>
-                        <span class="metric-value">${new Date(data.timestamp).toLocaleString()}</span>
+                        <span class="metric-label">Последнее обновление</span>
+                        <span class="metric-value">${new Date(data.timestamp).toLocaleString('ru-RU')}</span>
                     </div>
                 </div>
                 
-                <!-- Activity Overview -->
+                <!-- Обзор активности -->
                 <div class="card">
-                    <h3>🎯 Activity Overview</h3>
+                    <h3>🎯 Обзор активности</h3>
                     <div class="metric">
-                        <span class="metric-label">Total Pings</span>
+                        <span class="metric-label">Всего пингов</span>
                         <span class="metric-value">${data.activity.total_pings}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Last Activity</span>
-                        <span class="metric-value">${data.activity.last_activity ? new Date(data.activity.last_activity).toLocaleString() : 'Never'}</span>
+                        <span class="metric-label">Последняя активность</span>
+                        <span class="metric-value">${data.activity.last_activity ? new Date(data.activity.last_activity).toLocaleString('ru-RU') : 'Никогда'}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Recent Activity</span>
+                        <span class="metric-label">Недавняя активность</span>
                         <span class="metric-value">
                             <span class="status-indicator ${data.health.recent_activity_within_24h ? 'status-online' : 'status-warning'}"></span>
-                            ${data.health.recent_activity_within_24h ? 'Within 24h' : 'Over 24h ago'}
+                            ${data.health.recent_activity_within_24h ? 'В течение 24ч' : 'Более 24ч назад'}
                         </span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Operations Today</span>
+                        <span class="metric-label">Операций сегодня</span>
                         <span class="metric-value">${data.health.total_operations_today}</span>
                     </div>
                 </div>
                 
-                <!-- Daily Activity Chart -->
+                <!-- График ежедневной активности -->
                 <div class="card">
-                    <h3>📊 Daily Activity (Last 7 Days)</h3>
+                    <h3>📊 Ежедневная активность (последние 7 дней)</h3>
                     <div class="chart-container">
                         <canvas id="dailyChart"></canvas>
                     </div>
                 </div>
                 
-                <!-- Weekly Distribution -->
+                <!-- Распределение по дням недели -->
                 <div class="card">
-                    <h3>📅 Weekly Distribution</h3>
+                    <h3>📅 Распределение по дням недели</h3>
                     <div class="chart-container">
                         <canvas id="weeklyChart"></canvas>
                     </div>
                 </div>
                 
-                <!-- System Information -->
+                <!-- Системная информация -->
                 <div class="card">
-                    <h3>💻 System Information</h3>
+                    <h3>💻 Системная информация</h3>
                     ${data.system ? `
                         <div class="metric">
-                            <span class="metric-label">Platform</span>
+                            <span class="metric-label">Платформа</span>
                             <span class="metric-value">${data.system.platform}</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Node Version</span>
+                            <span class="metric-label">Версия Node</span>
                             <span class="metric-value">${data.system.version}</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Uptime</span>
-                            <span class="metric-value">${Math.round(data.system.uptime)}s</span>
+                            <span class="metric-label">Время работы</span>
+                            <span class="metric-value">${Math.round(data.system.uptime)}с</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Memory Usage</span>
-                            <span class="metric-value">${Math.round(data.system.memory?.heapUsed / 1024 / 1024)}MB</span>
+                            <span class="metric-label">Использование памяти</span>
+                            <span class="metric-value">${Math.round(data.system.memory?.heapUsed / 1024 / 1024)}МБ</span>
                         </div>
-                    ` : '<p>No system information available</p>'}
+                    ` : '<p>Системная информация недоступна</p>'}
                 </div>
                 
-                <!-- Recent Activities -->
+                <!-- Последние активности -->
                 <div class="card">
-                    <h3>🕒 Recent Activities</h3>
+                    <h3>🕒 Последние активности</h3>
                     <div class="activity-log">
                         ${data.recent_activities.length > 0 ? 
                             data.recent_activities.map(activity => 
-                                `<div class="log-entry">${new Date(activity).toLocaleString()}</div>`
+                                `<div class="log-entry">${new Date(activity).toLocaleString('ru-RU')}</div>`
                             ).join('') : 
-                            '<div class="log-entry">No recent activities</div>'
+                            '<div class="log-entry">Нет недавних активностей</div>'
                         }
                     </div>
                 </div>
             `;
             
-            // Render charts
-            renderCharts(data);
+            // Отрисовка графиков
+            renderCharts(data, dayNames);
         }
         
-        function renderCharts(data) {
-            // Daily Activity Chart
+        function renderCharts(data, dayNames) {
+            // График ежедневной активности
             const dailyCtx = document.getElementById('dailyChart');
             if (dailyCtx) {
                 new Chart(dailyCtx, {
                     type: 'line',
                     data: {
-                        labels: data.statistics.daily_pings_last_7_days.map(d => d.date),
+                        labels: data.statistics.daily_pings_last_7_days.map(d => 
+                            new Date(d.date).toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' })
+                        ),
                         datasets: [{
-                            label: 'Daily Pings',
+                            label: 'Ежедневные пинги',
                             data: data.statistics.daily_pings_last_7_days.map(d => d.count),
                             borderColor: '#667eea',
                             backgroundColor: 'rgba(102, 126, 234, 0.1)',
@@ -357,22 +360,39 @@
                         maintainAspectRatio: false,
                         scales: {
                             y: {
-                                beginAtZero: true
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Количество пингов'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: true
                             }
                         }
                     }
                 });
             }
             
-            // Weekly Distribution Chart
+            // График распределения по дням недели
             const weeklyCtx = document.getElementById('weeklyChart');
             if (weeklyCtx) {
+                const weeklyData = Object.keys(data.statistics.weekly_distribution).map(dayEn => {
+                    const dayIndex = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(dayEn);
+                    return {
+                        day: dayNames[dayIndex] || dayEn,
+                        count: data.statistics.weekly_distribution[dayEn]
+                    };
+                });
+                
                 new Chart(weeklyCtx, {
                     type: 'doughnut',
                     data: {
-                        labels: Object.keys(data.statistics.weekly_distribution),
+                        labels: weeklyData.map(d => d.day),
                         datasets: [{
-                            data: Object.values(data.statistics.weekly_distribution),
+                            data: weeklyData.map(d => d.count),
                             backgroundColor: [
                                 '#ff6384', '#36a2eb', '#cc65fe', '#ffce56',
                                 '#4bc0c0', '#9966ff', '#ff9f40'
@@ -381,16 +401,21 @@
                     },
                     options: {
                         responsive: true,
-                        maintainAspectRatio: false
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
                     }
                 });
             }
         }
         
-        // Load dashboard on page load
+        // Загрузка панели управления при загрузке страницы
         loadDashboard();
         
-        // Auto-refresh every 5 minutes
+        // Автообновление каждые 5 минут
         setInterval(loadDashboard, 5 * 60 * 1000);
     </script>
 </body>
