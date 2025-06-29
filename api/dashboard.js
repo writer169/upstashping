@@ -15,21 +15,21 @@ export default async function handler(req, res) {
 
     // Собираем всю статистику параллельно
     const [
-      metricsRes,
+      lastActivityRes,
+      lastPingDateRes,
+      serverStatusRes,
       totalPingsRes,
       recentActivitiesRes,
       systemInfoRes,
-      dbSizeRes,
-      maintenanceStatsRes,
-      maintenanceLogRes
+      dbSizeRes
     ] = await Promise.allSettled([
-      fetch(`${baseUrl}/hgetall/app_metrics`, { method: 'POST', headers }),
+      fetch(`${baseUrl}/get/app_metrics:last_activity`, { method: 'POST', headers }),
+      fetch(`${baseUrl}/get/app_metrics:last_ping_date`, { method: 'POST', headers }),
+      fetch(`${baseUrl}/get/app_metrics:server_status`, { method: 'POST', headers }),
       fetch(`${baseUrl}/get/total_pings`, { method: 'POST', headers }),
       fetch(`${baseUrl}/lrange/recent_activities/0/-1`, { method: 'POST', headers }),
       fetch(`${baseUrl}/get/system_info`, { method: 'POST', headers }),
-      fetch(`${baseUrl}/dbsize`, { method: 'POST', headers }),
-      fetch(`${baseUrl}/hgetall/maintenance_stats`, { method: 'POST', headers }),
-      fetch(`${baseUrl}/lrange/maintenance_log/0/9`, { method: 'POST', headers })
+      fetch(`${baseUrl}/dbsize`, { method: 'POST', headers })
     ]);
 
     // Получаем статистику по дням недели
@@ -68,13 +68,13 @@ export default async function handler(req, res) {
       return null;
     };
 
-    const metrics = await parseResponse(metricsRes);
+    const lastActivity = await parseResponse(lastActivityRes);
+    const lastPingDate = await parseResponse(lastPingDateRes);
+    const serverStatus = await parseResponse(serverStatusRes);
     const totalPings = await parseResponse(totalPingsRes);
     const recentActivities = await parseResponse(recentActivitiesRes);
     const systemInfo = await parseResponse(systemInfoRes);
     const dbSize = await parseResponse(dbSizeRes);
-    const maintenanceStats = await parseResponse(maintenanceStatsRes);
-    const maintenanceLog = await parseResponse(maintenanceLogRes);
 
     // Парсим статистику по дням недели
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -109,17 +109,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // Парсим логи обслуживания
-    let parsedMaintenanceLog = [];
-    if (maintenanceLog && Array.isArray(maintenanceLog)) {
-      parsedMaintenanceLog = maintenanceLog.map(log => {
-        try {
-          return typeof log === 'string' ? JSON.parse(log) : log;
-        } catch (e) {
-          return log;
-        }
-      });
-    }
+    // Парсим строковые JSON значения
+    const parseJsonString = (value) => {
+      if (!value) return value;
+      try {
+        return typeof value === 'string' ? JSON.parse(value) : value;
+      } catch (e) {
+        return value;
+      }
+    };
 
     const dashboard = {
       timestamp: new Date().toISOString(),
@@ -129,9 +127,9 @@ export default async function handler(req, res) {
       },
       activity: {
         total_pings: parseInt(totalPings) || 0,
-        last_activity: metrics?.last_activity || null,
-        last_ping_date: metrics?.last_ping_date || null,
-        server_status: metrics?.server_status || 'unknown'
+        last_activity: parseJsonString(lastActivity),
+        last_ping_date: parseJsonString(lastPingDate),
+        server_status: parseJsonString(serverStatus) || 'unknown'
       },
       recent_activities: recentActivities || [],
       statistics: {
@@ -139,15 +137,11 @@ export default async function handler(req, res) {
         weekly_distribution: weeklyStats,
         total_days_active: dailyPings.filter(d => d.count > 0).length
       },
-      maintenance: {
-        stats: maintenanceStats || {},
-        recent_log: parsedMaintenanceLog
-      },
       system: parsedSystemInfo,
       health: {
         database_responsive: dbSize !== null,
-        recent_activity_within_24h: metrics?.last_activity ? 
-          (Date.now() - new Date(metrics.last_activity).getTime()) < 86400000 : false,
+        recent_activity_within_24h: lastActivity ? 
+          (Date.now() - new Date(parseJsonString(lastActivity)).getTime()) < 86400000 : false,
         total_operations_today: dailyPings[dailyPings.length - 1]?.count || 0
       }
     };
