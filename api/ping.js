@@ -1,31 +1,45 @@
 export default async function handler(req, res) {
-  // Проверка API-ключа
+  // Проверяем API ключ
   const apiKey = req.headers['x-api-key'] || req.query.key;
+  
   if (!apiKey || apiKey !== process.env.API_KEY) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const baseUrl = `https://${process.env.UPSTASH_REDIS_ENDPOINT}`;
-  const headers = {
-    'Authorization': `Bearer ${process.env.UPSTASH_REDIS_TOKEN}`,
-    'Content-Type': 'application/json'
-  };
-
-  const timestamp = new Date().toISOString();
-  const date = timestamp.split('T')[0]; // YYYY-MM-DD
-  const dayOfWeek = new Date().getDay(); // 0-6
-
   try {
+    const baseUrl = `https://${process.env.UPSTASH_REDIS_ENDPOINT}`;
+    const headers = {
+      'Authorization': `Bearer ${process.env.UPSTASH_REDIS_TOKEN}`,
+      'Content-Type': 'application/json'
+    };
+
+    const timestamp = new Date().toISOString();
+    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const dayOfWeek = new Date().getDay(); // 0-6
+    
     const operations = [];
 
-    // 1. Метрики активности
+    // 1. Основные метрики активности (TTL 30 дней)
     operations.push(
-      fetch(`${baseUrl}/setex/app_metrics:last_activity/2592000`, { method: 'POST', headers, body: JSON.stringify(timestamp) }),
-      fetch(`${baseUrl}/setex/app_metrics:last_ping_date/2592000`, { method: 'POST', headers, body: JSON.stringify(date) }),
-      fetch(`${baseUrl}/setex/app_metrics:server_status/2592000`, { method: 'POST', headers, body: JSON.stringify("active") })
+      fetch(`${baseUrl}/setex/app_metrics:last_activity/2592000`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(timestamp)
+      }),
+      fetch(`${baseUrl}/setex/app_metrics:last_ping_date/2592000`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(date)
+      }),
+      fetch(`${baseUrl}/setex/app_metrics:server_status/2592000`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify("active")
+      })
     );
 
-    // 2. Дневной счетчик
+    // 2. Счетчики с TTL
+    // Дневной счетчик (TTL 10 дней - чтобы покрыть период отображения)
     operations.push(
       fetch(`${baseUrl}/eval`, {
         method: 'POST',
@@ -43,12 +57,12 @@ export default async function handler(req, res) {
             return redis.call('GET', key)
           `,
           keys: [`daily_pings:${date}`],
-          args: ["864000"]
+          args: ["864000"] // 10 дней
         })
       })
     );
 
-    // 3. Общий счетчик пингов
+    // Общий счетчик пингов (TTL 30 дней, будет обновляться при каждом пинге)
     operations.push(
       fetch(`${baseUrl}/eval`, {
         method: 'POST',
@@ -67,12 +81,12 @@ export default async function handler(req, res) {
             return redis.call('GET', key)
           `,
           keys: ["total_pings"],
-          args: ["2592000"]
+          args: ["2592000"] // 30 дней
         })
       })
     );
 
-    // 4. Счетчик по дням недели
+    // Счетчик по дням недели (TTL 30 дней)
     operations.push(
       fetch(`${baseUrl}/eval`, {
         method: 'POST',
@@ -91,12 +105,12 @@ export default async function handler(req, res) {
             return redis.call('GET', key)
           `,
           keys: [`stats:day_${dayOfWeek}`],
-          args: ["2592000"]
+          args: ["2592000"] // 30 дней
         })
       })
     );
 
-    // 5. Лог активности
+    // 3. Лог активности с TTL (30 дней)
     operations.push(
       fetch(`${baseUrl}/setex/activity_log:${timestamp}/2592000`, {
         method: 'POST',
@@ -110,7 +124,7 @@ export default async function handler(req, res) {
       })
     );
 
-    // 6. Список последних активностей
+    // 4. Список последних активностей с TTL (7 дней) и автоограничением
     operations.push(
       fetch(`${baseUrl}/eval`, {
         method: 'POST',
@@ -120,18 +134,25 @@ export default async function handler(req, res) {
             local key = KEYS[1]
             local value = ARGV[1]
             local ttl = ARGV[2]
+            
+            -- Добавляем новый элемент
             redis.call('LPUSH', key, value)
+            
+            -- Ограничиваем список до 10 элементов
             redis.call('LTRIM', key, 0, 9)
+            
+            -- Устанавливаем TTL
             redis.call('EXPIRE', key, ttl)
+            
             return redis.call('LRANGE', key, 0, -1)
           `,
           keys: ["recent_activities"],
-          args: [timestamp, "604800"]
+          args: [timestamp, "604800"] // 7 дней
         })
       })
     );
 
-    // 7. Системная информация
+    // 5. Системная информация с TTL (1 час - обновляется часто)
     const systemInfo = {
       timestamp,
       uptime: process.uptime(),
@@ -148,45 +169,38 @@ export default async function handler(req, res) {
       })
     );
 
-    // Выполнение всех операций
+    // Выполняем все операции
     const results = await Promise.allSettled(operations);
-
-    // Чтение данных
-    const readOps = await Promise.allSettled([
+    
+    // Читаем некоторые данные для проверки
+    const readOperations = await Promise.allSettled([
       fetch(`${baseUrl}/get/app_metrics:last_activity`, { method: 'POST', headers }),
       fetch(`${baseUrl}/get/total_pings`, { method: 'POST', headers }),
       fetch(`${baseUrl}/lrange/recent_activities/0/4`, { method: 'POST', headers })
     ]);
 
-    // Формируем отчёт
-    const summary = {
-      writes: results.map((r, i) => ({
-        index: i,
-        status: r.status,
-        error: r.status === 'rejected' ? r.reason.message : null
-      })),
-      reads: readOps.map((r, i) => ({
-        index: i,
-        status: r.status,
-        error: r.status === 'rejected' ? r.reason.message : null
-      }))
-    };
+    const successfulWrites = results.filter(r => r.status === 'fulfilled').length;
+    const successfulReads = readOperations.filter(r => r.status === 'fulfilled').length;
 
-    // Лог в консоль
-    console.log('Ping summary:', JSON.stringify(summary, null, 2));
-
-    res.status(200).json({
-      status: 'success',
+    console.log(`Redis activity completed: ${successfulWrites} writes, ${successfulReads} reads`);
+    
+    res.status(200).json({ 
+      status: 'success', 
+      message: 'Database activity completed successfully',
       timestamp,
-      summary
+      operations: {
+        writes_completed: successfulWrites,
+        reads_completed: successfulReads,
+        total_operations: results.length + readOperations.length
+      }
     });
 
   } catch (error) {
-    // Логируем неожиданные ошибки
-    console.error('Unexpected error in ping handler:', error);
-    res.status(200).json({
-      status: 'error',
-      message: error.message
+    console.error('Database activity error:', error.message);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Database activity failed',
+      error: error.message
     });
   }
 }
